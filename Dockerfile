@@ -50,5 +50,5 @@ RUN chown -R www-data:www-data /var/www/html \
 # Expose port
 EXPOSE 8000
 
-# Start Laravel
-CMD php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000
+# Start Laravel (wait for DB first)
+CMD bash -c "echo 'Waiting for MySQL...' && sleep 10 && php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000"
