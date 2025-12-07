@@ -1,121 +1,54 @@
-FROM debian:bookworm-slim as base
+# Stage 1: Build frontend assets
+FROM node:20-alpine AS frontend
 
-# Set version label
-LABEL maintainer="invoiceshelf"
-
-# Environment variables
-ENV PUID='1000'
-ENV PGID='1000'
-ENV USER='invoiceshelf'
-ENV PHP_TZ=UTC
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Arguments
-# To use the latest InvoiceShelf release instead of master pass `--build-arg TARGET=release` to `docker build`
-ARG TARGET=nightly
-# To install composer development dependencies, pass `--build-arg COMPOSER_NO_DEV=0` to `docker build`
-ARG COMPOSER_NO_DEV=1
-# To use another branch instead of master pass `--build-arg BRANCH=some-branch` to `docker build`
-# This is NOT compatible with the release target above
-ARG BRANCH=master
-
-# Install base dependencies, add user and group, clone the repo and install php libraries
-RUN \
-    set -ev && \
-    [ "$TARGET" != "release" -o "$BRANCH" = "master" ] && \
-    apt-get update && \
-    apt-get upgrade -qy && \
-    apt-get install -qy --no-install-recommends\
-    adduser \
-    nginx-light \
-    php8.2-mysql \
-    php8.2-pgsql \
-    php8.2-sqlite3 \
-    php8.2-imagick \
-    php8.2-mbstring \
-    php8.2-gd \
-    php8.2-xml \
-    php8.2-zip \
-    php8.2-fpm \
-    php8.2-redis \
-    php8.2-bcmath \
-    php8.2-intl \
-    php8.2-curl \
-    sendmail \
-    sqlite3 \
-    default-mysql-client \
-    curl \
-    git \
-    jpegoptim \
-    optipng \
-    pngquant \
-    gifsicle \
-    webp \
-    cron \
-    composer \
-    zip \
-    unzip && \
-    addgroup --gid "$PGID" "$USER" && \
-    adduser --gecos '' --no-create-home --disabled-password --uid "$PUID" --gid "$PGID" "$USER" && \
-    cd /var/www/html && \
-    LATEST_VERSION=$(curl -sX GET https://api.github.com/repos/InvoiceShelf/InvoiceShelf/releases/latest | awk '/tag_name/{print $4;exit}' FS='[""]') && \
-    if [ "$TARGET" = "release" ] ; then RELEASE_TAG="-b $LATEST_VERSION" ; \
-    elif [ "$BRANCH" != "master" ] ; then RELEASE_TAG="-b $BRANCH" ; fi && \
-    git clone --depth 1 $RELEASE_TAG https://github.com/InvoiceShelf/InvoiceShelf.git && \
-    mv InvoiceShelf/.git/refs/heads/$BRANCH InvoiceShelf/$BRANCH || cp InvoiceShelf/.git/HEAD InvoiceShelf/$BRANCH && \
-    mv InvoiceShelf/.git/HEAD InvoiceShelf/HEAD && \
-    rm -r InvoiceShelf/.git/* && \
-    mkdir -p InvoiceShelf/.git/refs/heads && \
-    mv InvoiceShelf/HEAD InvoiceShelf/.git/HEAD && \
-    mv InvoiceShelf/$BRANCH InvoiceShelf/.git/refs/heads/$BRANCH && \
-    echo "$TARGET" > /var/www/html/InvoiceShelf/docker_target && \
-    cd /var/www/html/InvoiceShelf && \
-    composer install --prefer-dist && \
-    find . -wholename '*/[Tt]ests/*' -delete && \
-    find . -wholename '*/[Tt]est/*' -delete && \
-    rm -r storage/framework/cache/data/* 2> /dev/null || true && \
-    rm    storage/framework/sessions/* 2> /dev/null || true && \
-    rm    storage/framework/views/* 2> /dev/null || true && \
-    rm    storage/logs/* 2> /dev/null || true && \
-    chown -R www-data:www-data /var/www/html/InvoiceShelf && \
-    echo "* * * * * www-data cd /var/www/html/InvoiceShelf && php artisan schedule:run >> /dev/null 2>&1" >> /etc/crontab && \
-    apt-get purge -y --autoremove git composer && \
-    apt-get clean -qy && \
-    rm -rf /var/lib/apt/lists/*
-
-# Multi-stage build: Build static assets
-# This allows us to not include Node within the final container
-FROM node:20 as static_builder
-
-RUN mkdir /app
-
-RUN mkdir -p  /app
 WORKDIR /app
-COPY --from=base /var/www/html/InvoiceShelf /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
 
-RUN npm install
-RUN yarn build
 
-# Get the static assets built in the previous step
-FROM base
-COPY --from=static_builder --chown=www-data:www-data /app/public /var/www/html/InvoiceShelf/public
+# Stage 2: PHP application
+FROM php:8.2-cli
 
-# Add custom Nginx configuration
-COPY default.conf /etc/nginx/nginx.conf
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    libzip-dev \
+    libicu-dev \
+    libonig-dev \
+    libxml2-dev \
+    zip \
+    unzip \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install pdo pdo_mysql mbstring exif pcntl bcmath gd zip intl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-EXPOSE 80
-VOLUME /conf /data
+# Install Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-WORKDIR /var/www/html/InvoiceShelf
+# Set working directory
+WORKDIR /var/www/html
 
-COPY entrypoint.sh inject.sh /
+# Copy application code
+COPY . .
 
-RUN chmod +x /entrypoint.sh && \
-    chmod +x /inject.sh && \
-    if [ ! -e /run/php ] ; then mkdir /run/php ; fi
+# Copy built frontend assets from stage 1
+COPY --from=frontend /app/public/build ./public/build
 
-HEALTHCHECK CMD curl --fail http://localhost:80/ || exit 1
+# Install PHP dependencies
+RUN composer install --no-dev --optimize-autoloader
 
-ENTRYPOINT [ "/entrypoint.sh" ]
+# Set permissions
+RUN chown -R www-data:www-data /var/www/html \
+    && chmod -R 775 storage bootstrap/cache
 
-CMD [ "nginx" ]
+# Expose port
+EXPOSE 8000
+
+# Start Laravel
+CMD php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000
