@@ -21,7 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->redirectUsersTo(AppServiceProvider::HOME);
 
         $middleware->validateCsrfTokens(except: [
-            'login',
+            '*',
         ]);
 
         $middleware->append([

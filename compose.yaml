@@ -36,7 +36,7 @@ services:
       - APP_NAME=Laravel
       - APP_ENV=local
       - APP_DEBUG=true
-      - APP_URL=http://localhost
+      - APP_URL=https://regarding-determination-laundry-strip.trycloudflare.com
       - DB_CONNECTION=pgsql
       - DB_HOST=invoiceshelf_db
       - DB_PORT=5432
@@ -48,15 +48,17 @@ services:
       - SESSION_LIFETIME=7200
       - SESSION_ENCRYPT=false
       - SESSION_PATH=/
-      - SESSION_DOMAIN=
-      - SANCTUM_STATEFUL_DOMAINS=localhost
+      - SESSION_DOMAIN=regarding-determination-laundry-strip.trycloudflare.com
+      - SANCTUM_STATEFUL_DOMAINS=localhost,127.0.0.1,::1,regarding-determination-laundry-strip.trycloudflare.com,*.trycloudflare.com
+      - SESSION_SECURE_COOKIE=true
+
       - STARTUP_DELAY=10
       - MAIL_DRIVER=smtp
       - MAIL_HOST=smtp.gmail.com
       - MAIL_PORT=587
       - MAIL_USERNAME=u2100960@siswa.um.edu.my
-      - MAIL_PASSWORD=qubaaigdzhoavzoa
-      # - MAIL_PASSWORD_FILE=<filename>
+      - MAIL_PASSWORD=djhewcrizqcwxzyi
+      - MAIL_PASSWORD_FILE=<filename>
       - MAIL_ENCRYPTION=tls
     restart: unless-stopped
     depends_on:
